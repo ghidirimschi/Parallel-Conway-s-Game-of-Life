@@ -1,0 +1,147 @@
+#include "../util/dish.h"
+#include "../util/golInput.h"
+#include <mpi.h>
+
+int rank, size;
+
+#define ADJACENT_NR 8
+#define POS_X       0
+#define POS_Y       1
+
+size_t pos[ADJACENT_NR][2] = {
+        {-1, -1}, { 0, -1}, { 1, -1},
+        {-1,  0},           { 1,  0},
+        {-1,  1}, { 0,  1}, { 1,  1}};
+
+
+int toValidPos(int x, int n) {
+    if (x >= 0 && x < n) return x;
+    if (x >= n) return 0;
+    return n - 1;
+
+}
+
+char updateCell(size_t x, size_t y, Dish dish, size_t width) {
+    size_t nx, ny, aliveAdjacent = 0;
+    for (int i = 0; i < ADJACENT_NR; ++i) {
+        nx = x + pos[i][POS_X];
+        ny = toValidPos(y + pos[i][POS_Y], width);
+        aliveAdjacent += (dish[nx][ny] == ALIVE_CELL);
+    }
+    return ((dish[x][y] == ALIVE_CELL && (aliveAdjacent == 2 || aliveAdjacent == 3))
+            || (dish[x][y] == DEAD_CELL && aliveAdjacent == 3)) ? ALIVE_CELL : DEAD_CELL;
+}
+
+
+
+
+int updateBoundaries(Dish subDish, const int *rows, int width) {
+    MPI_Status status;
+    if (!rank) {
+        MPI_Sendrecv(subDish[rows[rank]], width, MPI_CHAR,
+                     1, 0, subDish[rows[rank] + 1], width, MPI_CHAR,
+                     1, 0, MPI_COMM_WORLD, &status);
+        MPI_Sendrecv(subDish[1], width, MPI_CHAR,
+                     size - 1, 0, subDish[0], width, MPI_CHAR,
+                     size - 1, 0, MPI_COMM_WORLD, &status);
+    } else {
+        MPI_Sendrecv(subDish[1], width, MPI_CHAR,
+                     rank - 1, 0, subDish[0], width, MPI_CHAR,
+                     rank - 1, 0, MPI_COMM_WORLD, &status);
+        MPI_Sendrecv(subDish[rows[rank]], width, MPI_CHAR,
+                     (rank + 1) % size, 0, subDish[rows[rank] + 1], width, MPI_CHAR,
+                     (rank + 1) % size, 0, MPI_COMM_WORLD, &status);
+    }
+
+}
+
+void updateSubDish(Dish prevSubDish, Dish currSubDish, int height, int width) {
+    for (size_t r = 1; r <= height; ++r) {
+        for (size_t c = 0; c < width; ++c) {
+            currSubDish[r][c] = updateCell(r, c, prevSubDish, width);
+        }
+    }
+}
+
+
+int *distributeRows(size_t n) {
+    int rest = n % size, quotient = n / size,
+            *rows = malloc(size * sizeof(int));
+
+    for (size_t i = 0; i < size; ++i) {
+        rows[i] = quotient + (i < rest);
+    }
+    return rows;
+}
+
+int *computeDispls(const int *rows, int n) {
+    int *displs = malloc(size * sizeof(int));
+    displs[0] = 0;
+    for (size_t i = 1; i < size; ++i) {
+        displs[i] = displs[i - 1] + n * rows[i - 1];
+    }
+    return displs;
+
+}
+
+int *computeSendcounts(const int *rows, int n) {
+    int *sendcounts = malloc(size * sizeof(int));
+    for (size_t i = 0; i < size; ++i) {
+        sendcounts[i] = rows[i] * n;
+    }
+    return sendcounts;
+}
+
+int main (int argc, char **argv) {
+    MPI_Init (&argc, &argv);
+    MPI_Comm_rank (MPI_COMM_WORLD, &rank);
+    MPI_Comm_size (MPI_COMM_WORLD, &size);
+
+    size_t n, it;
+    Dish dish = NULL;
+
+    if (!rank) {
+        dish = readDish(&n);
+        scanf("%lu\n", &it);
+    }
+
+    MPI_Bcast(&n, 1, MPI_UNSIGNED_LONG, 0, MPI_COMM_WORLD);
+    MPI_Bcast(&it, 1, MPI_UNSIGNED_LONG, 0, MPI_COMM_WORLD);
+
+    int *rows = distributeRows(n);
+
+    Dish currSubDish = createSubDish(rows[rank], n),
+         prevSubDish = createSubDish(rows[rank], n),
+         tmp;
+
+    int *sendcounts = computeSendcounts(rows, n),
+            *displs = computeDispls(rows, n);
+
+    MPI_Scatterv(rank ? NULL : dish[0], sendcounts, displs, MPI_CHAR, currSubDish[1],
+                 sendcounts[rank] + n, MPI_CHAR, 0, MPI_COMM_WORLD);
+
+    for (size_t i = 0; i < it; ++i) {
+        tmp = prevSubDish;
+        prevSubDish = currSubDish;
+        currSubDish = tmp;
+        updateBoundaries(prevSubDish, rows, n);
+        updateSubDish(prevSubDish, currSubDish, rows[rank], n);
+        MPI_Barrier(MPI_COMM_WORLD);
+    }
+
+    MPI_Gatherv(currSubDish[1], sendcounts[rank], MPI_CHAR,
+                rank ? NULL : dish[0], sendcounts, displs,
+                MPI_CHAR, 0, MPI_COMM_WORLD);
+
+    if (!rank) {
+        printDish(dish, n, n);
+        freeDish(dish, n);
+    }
+    freeSubDish(prevSubDish, rows[rank], n);
+    freeSubDish(currSubDish, rows[rank], n);
+
+    MPI_Finalize ();
+    return EXIT_SUCCESS;
+
+}
+
