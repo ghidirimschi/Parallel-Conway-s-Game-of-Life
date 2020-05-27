@@ -33,25 +33,24 @@ char updateCell(size_t x, size_t y, Dish dish, size_t width) {
 }
 
 
-
+int mod(int r, int s) {
+    if (r < 0) {
+        return s - 1;
+    }
+    if (r >= s) {
+        return 0;
+    }
+    return r;
+}
 
 int updateBoundaries(Dish subDish, const int *rows, int width) {
     MPI_Status status;
-    if (!rank) {
-        MPI_Sendrecv(subDish[rows[rank]], width, MPI_CHAR,
-                     1, 0, subDish[rows[rank] + 1], width, MPI_CHAR,
-                     1, 0, MPI_COMM_WORLD, &status);
-        MPI_Sendrecv(subDish[1], width, MPI_CHAR,
-                     size - 1, 0, subDish[0], width, MPI_CHAR,
-                     size - 1, 0, MPI_COMM_WORLD, &status);
-    } else {
-        MPI_Sendrecv(subDish[1], width, MPI_CHAR,
-                     rank - 1, 0, subDish[0], width, MPI_CHAR,
-                     rank - 1, 0, MPI_COMM_WORLD, &status);
-        MPI_Sendrecv(subDish[rows[rank]], width, MPI_CHAR,
-                     (rank + 1) % size, 0, subDish[rows[rank] + 1], width, MPI_CHAR,
-                     (rank + 1) % size, 0, MPI_COMM_WORLD, &status);
-    }
+    MPI_Sendrecv(subDish[rows[rank]], width, MPI_CHAR,
+                 mod(rank + 1, size), 0, subDish[0], width, MPI_CHAR,
+                 mod((int)rank - 1, size), 0, MPI_COMM_WORLD, &status);
+    MPI_Sendrecv(subDish[1], width, MPI_CHAR,
+                 mod((int)rank - 1, size), 0, subDish[rows[rank] + 1],
+                 width, MPI_CHAR,mod(rank + 1, size), 0, MPI_COMM_WORLD, &status);
 
 }
 
@@ -137,6 +136,10 @@ int main (int argc, char **argv) {
         printDish(dish, n, n);
         freeDish(dish, n);
     }
+
+    free(rows);
+    free(sendcounts);
+    free(displs);
     freeSubDish(prevSubDish, rows[rank], n);
     freeSubDish(currSubDish, rows[rank], n);
 
