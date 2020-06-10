@@ -8,31 +8,20 @@ int rank, size;
 #define POS_X       0
 #define POS_Y       1
 
+
+/**
+ * The relative positions of adjacent cells.
+ */
 size_t pos[ADJACENT_NR][2] = {
         {-1, -1}, { 0, -1}, { 1, -1},
         {-1,  0},           { 1,  0},
         {-1,  1}, { 0,  1}, { 1,  1}};
 
 
-int toValidPos(int x, int n) {
-    if (x >= 0 && x < n) return x;
-    if (x >= n) return 0;
-    return n - 1;
-
-}
-
-char updateCell(size_t x, size_t y, Dish dish, size_t width) {
-    size_t nx, ny, aliveAdjacent = 0;
-    for (int i = 0; i < ADJACENT_NR; ++i) {
-        nx = x + pos[i][POS_X];
-        ny = toValidPos(y + pos[i][POS_Y], width);
-        aliveAdjacent += (dish[nx][ny] == ALIVE_CELL);
-    }
-    return ((dish[x][y] == ALIVE_CELL && (aliveAdjacent == 2 || aliveAdjacent == 3))
-            || (dish[x][y] == DEAD_CELL && aliveAdjacent == 3)) ? ALIVE_CELL : DEAD_CELL;
-}
-
-
+/**
+ * Given a value r in the range [-1, s+1), return r mod s. That is,
+ * if r is equal to s return 0, if r is -1, return s -1 and r otherwise.
+ */
 int mod(int r, int s) {
     if (r < 0) {
         return s - 1;
@@ -42,6 +31,18 @@ int mod(int r, int s) {
     }
     return r;
 }
+
+char updateCell(size_t x, size_t y, Dish dish, size_t width) {
+    size_t nx, ny, aliveAdjacent = 0;
+    for (int i = 0; i < ADJACENT_NR; ++i) {
+        nx = x + pos[i][POS_X];
+        ny = mod(y + pos[i][POS_Y], width);
+        aliveAdjacent += (dish[nx][ny] == ALIVE_CELL);
+    }
+    return ((dish[x][y] == ALIVE_CELL && (aliveAdjacent == 2 || aliveAdjacent == 3))
+            || (dish[x][y] == DEAD_CELL && aliveAdjacent == 3)) ? ALIVE_CELL : DEAD_CELL;
+}
+
 
 int updateBoundaries(Dish subDish, const int *rows, int width) {
     MPI_Status status;
@@ -137,11 +138,12 @@ int main (int argc, char **argv) {
         freeDish(dish, n);
     }
 
+    freeSubDish(prevSubDish, rows[rank], n);
+    freeSubDish(currSubDish, rows[rank], n);
     free(rows);
     free(sendcounts);
     free(displs);
-    freeSubDish(prevSubDish, rows[rank], n);
-    freeSubDish(currSubDish, rows[rank], n);
+
 
     MPI_Finalize ();
     return EXIT_SUCCESS;
